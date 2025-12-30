@@ -1,11 +1,10 @@
-import { Module } from '@nestjs/common';
-import { DatabaseModule } from '../database';
-import { PostgresService } from './postgres.service';
-import { RedisService } from './redis.service';
+import { Module } from "@nestjs/common";
+import { DatabaseModule } from "../database";
+import { RedisService } from "./redis.service";
 
 @Module({
   imports: [DatabaseModule],
-  providers: [RedisService, PostgresService],
-  exports: [RedisService, PostgresService],
+  providers: [RedisService],
+  exports: [RedisService],
 })
 export class StorageModule {}

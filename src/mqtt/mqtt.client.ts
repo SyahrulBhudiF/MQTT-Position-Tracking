@@ -131,7 +131,7 @@ export class MqttClient
   /**
    * Wait for connection to be established
    */
-  async waitForConnection(timeoutMs: number = 30000): Promise<void> {
+  async waitForConnection(timeoutMs = 30000): Promise<void> {
     if (this.isConnected) {
       return;
     }
