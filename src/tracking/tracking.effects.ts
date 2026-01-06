@@ -1,14 +1,14 @@
-import { Effect, pipe } from 'effect';
-import type { ProcessedPosition, TrackingPayload } from '../shared/types';
-import { TrackingPayloadSchema } from '../shared/types';
-import type { PositionUpdateDto } from './dto/tracking.dto';
+import { Effect, Schema, pipe } from "effect";
+import type { ProcessedPosition, TrackingPayload } from "../shared/types";
+import { TrackingPayloadSchema } from "../shared/types";
+import type { PositionUpdateDto } from "./dto/tracking.dto";
 import {
   InvalidCoordinatesError,
   PayloadValidationError,
   StaleDataError,
   type StorageError,
   TimestampParseError,
-} from './tracking.errors';
+} from "./tracking.errors";
 
 /**
  * Configuration for tracking effects
@@ -21,9 +21,15 @@ export interface TrackingEffectsConfig {
  * Dependencies required by tracking effects
  */
 export interface TrackingEffectsDeps {
-  saveToRedis: (position: ProcessedPosition) => Effect.Effect<void, StorageError, never>;
-  saveToPostgres: (position: ProcessedPosition) => Effect.Effect<void, StorageError, never>;
-  broadcastPosition: (update: PositionUpdateDto) => Effect.Effect<void, never, never>;
+  saveToRedis: (
+    position: ProcessedPosition,
+  ) => Effect.Effect<void, StorageError, never>;
+  saveToPostgres: (
+    position: ProcessedPosition,
+  ) => Effect.Effect<void, StorageError, never>;
+  broadcastPosition: (
+    update: PositionUpdateDto,
+  ) => Effect.Effect<void, never, never>;
 }
 
 /**
@@ -32,26 +38,19 @@ export interface TrackingEffectsDeps {
 export const validatePayload = (
   rawPayload: unknown,
 ): Effect.Effect<TrackingPayload, PayloadValidationError, never> => {
-  return Effect.try({
-    try: () => {
-      const result = TrackingPayloadSchema.safeParse(rawPayload);
-      if (!result.success) {
-        throw result.error;
-      }
-      return result.data;
-    },
-    catch: (error) => {
-      const validationErrors =
-        error && typeof error === 'object' && 'errors' in error
-          ? (error.errors as Array<{ message: string }>).map((e) => e.message)
-          : ['Unknown validation error'];
+  return pipe(
+    Schema.decodeUnknown(TrackingPayloadSchema)(rawPayload),
+    Effect.mapError((parseError) => {
+      const validationErrors = parseError.message
+        ? [parseError.message]
+        : ["Unknown validation error"];
       return new PayloadValidationError({
-        message: 'Payload validation failed',
+        message: "Payload validation failed",
         payload: rawPayload,
         validationErrors,
       });
-    },
-  });
+    }),
+  );
 };
 
 /**
@@ -64,7 +63,7 @@ export const parseTimestamp = (
     try: () => {
       const date = new Date(timestamp);
       if (Number.isNaN(date.getTime())) {
-        throw new Error('Invalid date');
+        throw new Error("Invalid date");
       }
       return date;
     },
@@ -82,7 +81,11 @@ export const parseTimestamp = (
 export const validateCoordinates = (
   latitude: number,
   longitude: number,
-): Effect.Effect<{ latitude: number; longitude: number }, InvalidCoordinatesError, never> => {
+): Effect.Effect<
+  { latitude: number; longitude: number },
+  InvalidCoordinatesError,
+  never
+> => {
   return Effect.try({
     try: () => {
       if (latitude < -90 || latitude > 90) {
@@ -117,7 +120,7 @@ export const checkStaleData = (
       const dataAge = now - timestamp.getTime();
 
       if (dataAge > thresholdMs) {
-        throw new Error('Data is stale');
+        throw new Error("Data is stale");
       }
 
       return timestamp;
@@ -218,9 +221,12 @@ export const processTrackingData = (
     // Step 6: Save to Redis and PostgreSQL in parallel
     Effect.flatMap((position) =>
       pipe(
-        Effect.all([deps.saveToRedis(position), deps.saveToPostgres(position)], {
-          concurrency: 2,
-        }),
+        Effect.all(
+          [deps.saveToRedis(position), deps.saveToPostgres(position)],
+          {
+            concurrency: 2,
+          },
+        ),
         Effect.map(() => position),
       ),
     ),
@@ -250,7 +256,7 @@ export const processTrackingDataWithLogging = (
     processTrackingData(rawPayload, config, deps),
     Effect.tap((update) =>
       Effect.sync(() => {
-        logger.debug('Successfully processed tracking data', {
+        logger.debug("Successfully processed tracking data", {
           participantId: update.participantId,
           raceId: update.raceId,
         });
@@ -259,14 +265,14 @@ export const processTrackingDataWithLogging = (
     Effect.catchTags({
       PayloadValidationError: (error) =>
         Effect.sync(() => {
-          logger.warn('Payload validation failed', {
+          logger.warn("Payload validation failed", {
             errors: error.validationErrors,
           });
           return null;
         }),
       StaleDataError: (error) =>
         Effect.sync(() => {
-          logger.warn('Dropped stale data', {
+          logger.warn("Dropped stale data", {
             participantId: error.participantId,
             raceId: error.raceId,
             dataTimestamp: error.dataTimestamp.toISOString(),
@@ -275,14 +281,14 @@ export const processTrackingDataWithLogging = (
         }),
       TimestampParseError: (error) =>
         Effect.sync(() => {
-          logger.warn('Failed to parse timestamp', {
+          logger.warn("Failed to parse timestamp", {
             rawTimestamp: error.rawTimestamp,
           });
           return null;
         }),
       InvalidCoordinatesError: (error) =>
         Effect.sync(() => {
-          logger.warn('Invalid coordinates received', {
+          logger.warn("Invalid coordinates received", {
             latitude: error.latitude,
             longitude: error.longitude,
           });
@@ -290,7 +296,7 @@ export const processTrackingDataWithLogging = (
         }),
       StorageError: (error) =>
         Effect.sync(() => {
-          logger.error('Storage operation failed', {
+          logger.error("Storage operation failed", {
             operation: error.operation,
             message: error.message,
           });
@@ -315,9 +321,13 @@ export const batchProcessTrackingData = (
 ): Effect.Effect<PositionUpdateDto[], never, never> => {
   return pipe(
     Effect.all(
-      payloads.map((payload) => processTrackingDataWithLogging(payload, config, deps, logger)),
+      payloads.map((payload) =>
+        processTrackingDataWithLogging(payload, config, deps, logger),
+      ),
       { concurrency: 10 },
     ),
-    Effect.map((results) => results.filter((r): r is PositionUpdateDto => r !== null)),
+    Effect.map((results) =>
+      results.filter((r): r is PositionUpdateDto => r !== null),
+    ),
   );
 };

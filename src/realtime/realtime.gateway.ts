@@ -1,4 +1,4 @@
-import { Logger, UseGuards } from '@nestjs/common';
+import { Logger, UseGuards } from "@nestjs/common";
 import {
   ConnectedSocket,
   MessageBody,
@@ -8,11 +8,12 @@ import {
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
-} from '@nestjs/websockets';
-import type { Server, Socket } from 'socket.io';
-import { WsAuthGuard } from '../common/guards/ws-auth.guard';
-import type { PositionUpdateDto } from '../tracking/dto/tracking.dto';
-import { SubscribeRaceSchema } from '../tracking/dto/tracking.dto';
+} from "@nestjs/websockets";
+import { Schema } from "effect";
+import type { Server, Socket } from "socket.io";
+import { WsAuthGuard } from "../common/guards/ws-auth.guard";
+import type { PositionUpdateDto } from "../tracking/dto/tracking.dto";
+import { SubscribeRaceSchema } from "../tracking/dto/tracking.dto";
 
 interface SubscribedClient {
   socketId: string;
@@ -21,12 +22,14 @@ interface SubscribedClient {
 
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: "*",
     credentials: true,
   },
-  namespace: '/tracking',
+  namespace: "/tracking",
 })
-export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   private server: Server;
 
@@ -34,7 +37,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   private readonly subscribedClients = new Map<string, SubscribedClient>();
 
   afterInit(): void {
-    this.logger.log('WebSocket Gateway initialized');
+    this.logger.log("WebSocket Gateway initialized");
   }
 
   handleConnection(client: Socket): void {
@@ -62,7 +65,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
    * Handle subscription to race position updates
    */
   @UseGuards(WsAuthGuard)
-  @SubscribeMessage('subscribe_race')
+  @SubscribeMessage("subscribe_race")
   handleSubscribeRace(
     @MessageBody() data: unknown,
     @ConnectedSocket() client: Socket,
@@ -70,19 +73,20 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     event: string;
     data: { success: boolean; message: string; raceId?: string };
   } {
-    const validation = SubscribeRaceSchema.safeParse(data);
-
-    if (!validation.success) {
+    let raceId: string;
+    try {
+      const validated = Schema.decodeUnknownSync(SubscribeRaceSchema)(data);
+      raceId = validated.raceId;
+    } catch {
       return {
-        event: 'subscribe_race_response',
+        event: "subscribe_race_response",
         data: {
           success: false,
-          message: 'Invalid race ID',
+          message: "Invalid race ID",
         },
       };
     }
 
-    const { raceId } = validation.data;
     const roomName = `race:${raceId}`;
 
     // Join the race room
@@ -97,7 +101,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.logger.log(`Client ${client.id} subscribed to race ${raceId}`);
 
     return {
-      event: 'subscribe_race_response',
+      event: "subscribe_race_response",
       data: {
         success: true,
         message: `Subscribed to race ${raceId}`,
@@ -109,7 +113,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   /**
    * Handle unsubscription from race position updates
    */
-  @SubscribeMessage('unsubscribe_race')
+  @SubscribeMessage("unsubscribe_race")
   handleUnsubscribeRace(
     @MessageBody() data: unknown,
     @ConnectedSocket() client: Socket,
@@ -117,19 +121,20 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     event: string;
     data: { success: boolean; message: string; raceId?: string };
   } {
-    const validation = SubscribeRaceSchema.safeParse(data);
-
-    if (!validation.success) {
+    let raceId: string;
+    try {
+      const validated = Schema.decodeUnknownSync(SubscribeRaceSchema)(data);
+      raceId = validated.raceId;
+    } catch {
       return {
-        event: 'unsubscribe_race_response',
+        event: "unsubscribe_race_response",
         data: {
           success: false,
-          message: 'Invalid race ID',
+          message: "Invalid race ID",
         },
       };
     }
 
-    const { raceId } = validation.data;
     const roomName = `race:${raceId}`;
 
     // Leave the race room
@@ -144,7 +149,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.logger.log(`Client ${client.id} unsubscribed from race ${raceId}`);
 
     return {
-      event: 'unsubscribe_race_response',
+      event: "unsubscribe_race_response",
       data: {
         success: true,
         message: `Unsubscribed from race ${raceId}`,
@@ -159,7 +164,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   broadcastPositionUpdate(update: PositionUpdateDto): void {
     const roomName = `race:${update.raceId}`;
 
-    this.server.to(roomName).emit('position_update', {
+    this.server.to(roomName).emit("position_update", {
       participantId: update.participantId,
       raceId: update.raceId,
       latitude: update.latitude,
@@ -176,10 +181,13 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   /**
    * Broadcast batch position updates to all clients subscribed to the race
    */
-  broadcastBatchPositionUpdate(raceId: string, updates: PositionUpdateDto[]): void {
+  broadcastBatchPositionUpdate(
+    raceId: string,
+    updates: PositionUpdateDto[],
+  ): void {
     const roomName = `race:${raceId}`;
 
-    this.server.to(roomName).emit('batch_position_update', {
+    this.server.to(roomName).emit("batch_position_update", {
       raceId,
       positions: updates.map((update) => ({
         participantId: update.participantId,

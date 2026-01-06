@@ -1,9 +1,11 @@
-import { z } from 'zod';
+import { Schema } from "effect";
 import {
+  DateTimeString,
+  NonEmptyString,
   type ParticipantStatus,
   type TrackingPayload,
   TrackingPayloadSchema,
-} from '../../shared/types';
+} from "../../shared/types";
 
 /**
  * DTO for incoming MQTT tracking payload
@@ -17,19 +19,19 @@ export class TrackingPayloadDto implements TrackingPayload {
   status: ParticipantStatus;
 
   static validate(data: unknown): TrackingPayloadDto | null {
-    const result = TrackingPayloadSchema.safeParse(data);
-    if (!result.success) {
+    try {
+      const result = Schema.decodeUnknownSync(TrackingPayloadSchema)(data);
+      const dto = new TrackingPayloadDto();
+      dto.participant_id = result.participant_id;
+      dto.race_id = result.race_id;
+      dto.latitude = result.latitude;
+      dto.longitude = result.longitude;
+      dto.timestamp = result.timestamp;
+      dto.status = result.status;
+      return dto;
+    } catch {
       return null;
     }
-
-    const dto = new TrackingPayloadDto();
-    dto.participant_id = result.data.participant_id;
-    dto.race_id = result.data.race_id;
-    dto.latitude = result.data.latitude;
-    dto.longitude = result.data.longitude;
-    dto.timestamp = result.data.timestamp;
-    dto.status = result.data.status;
-    return dto;
   }
 
   static fromPayload(payload: TrackingPayload): TrackingPayloadDto {
@@ -78,43 +80,51 @@ export class PositionUpdateDto {
 }
 
 /**
- * DTO for subscribing to race updates
+ * Schema for subscribing to race updates
  */
-export const SubscribeRaceSchema = z.object({
-  raceId: z.string().min(1),
+export const SubscribeRaceSchema = Schema.Struct({
+  raceId: NonEmptyString,
 });
 
-export type SubscribeRaceDto = z.infer<typeof SubscribeRaceSchema>;
+export type SubscribeRaceDto = typeof SubscribeRaceSchema.Type;
 
 /**
- * DTO for position history query
+ * Schema for position history query
  */
-export const PositionHistoryQuerySchema = z.object({
-  participantId: z.string().min(1),
-  raceId: z.string().min(1),
-  limit: z.number().int().min(1).max(1000).optional().default(100),
-  startTime: z.string().datetime().optional(),
-  endTime: z.string().datetime().optional(),
+export const PositionHistoryQuerySchema = Schema.Struct({
+  participantId: NonEmptyString,
+  raceId: NonEmptyString,
+  limit: Schema.optionalWith(
+    Schema.Number.pipe(
+      Schema.int({ message: () => "Limit must be an integer" }),
+      Schema.between(1, 1000, {
+        message: () => "Limit must be between 1 and 1000",
+      }),
+    ),
+    { default: () => 100 },
+  ),
+  startTime: Schema.optional(DateTimeString),
+  endTime: Schema.optional(DateTimeString),
 });
 
-export type PositionHistoryQueryDto = z.infer<typeof PositionHistoryQuerySchema>;
+export type PositionHistoryQueryDto = typeof PositionHistoryQuerySchema.Type;
 
 /**
- * DTO for race positions query
+ * Schema for race positions query
  */
-export const RacePositionsQuerySchema = z.object({
-  raceId: z.string().min(1),
-  startTime: z.string().datetime().optional(),
-  endTime: z.string().datetime().optional(),
+export const RacePositionsQuerySchema = Schema.Struct({
+  raceId: NonEmptyString,
+  startTime: Schema.optional(DateTimeString),
+  endTime: Schema.optional(DateTimeString),
 });
 
-export type RacePositionsQueryDto = z.infer<typeof RacePositionsQuerySchema>;
+export type RacePositionsQueryDto = typeof RacePositionsQuerySchema.Type;
 
 /**
  * DTO for WebSocket position broadcast
  */
 export class PositionBroadcastDto {
-  event: 'position_update';
+  event: "position_update";
   data: {
     participantId: string;
     raceId: string;
@@ -126,7 +136,7 @@ export class PositionBroadcastDto {
 
   static fromPositionUpdate(update: PositionUpdateDto): PositionBroadcastDto {
     const dto = new PositionBroadcastDto();
-    dto.event = 'position_update';
+    dto.event = "position_update";
     dto.data = {
       participantId: update.participantId,
       raceId: update.raceId,
@@ -143,7 +153,7 @@ export class PositionBroadcastDto {
  * DTO for batch position update (multiple participants)
  */
 export class BatchPositionBroadcastDto {
-  event: 'batch_position_update';
+  event: "batch_position_update";
   data: {
     raceId: string;
     positions: Array<{
@@ -155,9 +165,12 @@ export class BatchPositionBroadcastDto {
     }>;
   };
 
-  static create(raceId: string, positions: PositionUpdateDto[]): BatchPositionBroadcastDto {
+  static create(
+    raceId: string,
+    positions: PositionUpdateDto[],
+  ): BatchPositionBroadcastDto {
     const dto = new BatchPositionBroadcastDto();
-    dto.event = 'batch_position_update';
+    dto.event = "batch_position_update";
     dto.data = {
       raceId,
       positions: positions.map((p) => ({
