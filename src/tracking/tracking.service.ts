@@ -1,18 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Effect, pipe } from 'effect';
-import { AppConfigService } from '../config/config.service';
-import type { TrackingPosition } from '../database';
-import { runEffect } from '../shared/effect';
-import type { ProcessedPosition } from '../shared/types';
-import { RedisService } from '../storage/redis.service';
-import type { PositionUpdateDto } from './dto/tracking.dto';
+import { Injectable, Logger } from "@nestjs/common";
+import { Effect, pipe } from "effect";
+import { AppConfigService } from "../config/config.service";
+import type { TrackingPosition } from "../database";
+import type { ProcessedPosition } from "../shared/types";
+import { RedisService } from "../storage/redis.service";
+import type { PositionUpdateDto } from "./dto/tracking.dto";
 import {
   type TrackingEffectsConfig,
   type TrackingEffectsDeps,
   processTrackingDataWithLogging,
-} from './tracking.effects';
-import { StorageError } from './tracking.errors';
-import { TrackingRepository } from './tracking.repository';
+} from "./tracking.effects";
+import { StorageError } from "./tracking.errors";
+import { TrackingRepository } from "./tracking.repository";
 
 @Injectable()
 export class TrackingService {
@@ -39,13 +38,18 @@ export class TrackingService {
   ): Promise<PositionUpdateDto | null> {
     const deps = this.createEffectsDeps(broadcastFn);
 
-    const effect = processTrackingDataWithLogging(rawPayload, this.effectsConfig, deps, {
-      debug: (msg, ctx) => this.logger.debug(msg, ctx),
-      warn: (msg, ctx) => this.logger.warn(msg, ctx),
-      error: (msg, ctx) => this.logger.error(msg, ctx),
-    });
+    const effect = processTrackingDataWithLogging(
+      rawPayload,
+      this.effectsConfig,
+      deps,
+      {
+        debug: (msg, ctx) => this.logger.debug(msg, ctx),
+        warn: (msg, ctx) => this.logger.warn(msg, ctx),
+        error: (msg, ctx) => this.logger.error(msg, ctx),
+      },
+    );
 
-    return runEffect(effect);
+    return Effect.runPromise(effect);
   }
 
   /**
@@ -56,13 +60,17 @@ export class TrackingService {
     raceId: string,
     limit = 100,
   ): Promise<TrackingPosition[]> {
-    const effect = this.trackingRepository.findByParticipantAndRace(participantId, raceId, limit);
+    const effect = this.trackingRepository.findByParticipantAndRace(
+      participantId,
+      raceId,
+      limit,
+    );
 
-    return runEffect(
+    return Effect.runPromise(
       pipe(
         effect,
-        Effect.catchTag('StorageError', (error) => {
-          this.logger.error('Failed to get position history', {
+        Effect.catchTag("StorageError", (error) => {
+          this.logger.error("Failed to get position history", {
             error: error.message,
             participantId,
             raceId,
@@ -82,11 +90,11 @@ export class TrackingService {
   ): Promise<TrackingPosition[]> {
     const effect = this.trackingRepository.findByRace(raceId, options);
 
-    return runEffect(
+    return Effect.runPromise(
       pipe(
         effect,
-        Effect.catchTag('StorageError', (error) => {
-          this.logger.error('Failed to get race positions', {
+        Effect.catchTag("StorageError", (error) => {
+          this.logger.error("Failed to get race positions", {
             error: error.message,
             raceId,
           });
@@ -102,11 +110,11 @@ export class TrackingService {
   async getLatestRacePositions(raceId: string): Promise<TrackingPosition[]> {
     const effect = this.trackingRepository.findLatestByRace(raceId);
 
-    return runEffect(
+    return Effect.runPromise(
       pipe(
         effect,
-        Effect.catchTag('StorageError', (error) => {
-          this.logger.error('Failed to get latest race positions', {
+        Effect.catchTag("StorageError", (error) => {
+          this.logger.error("Failed to get latest race positions", {
             error: error.message,
             raceId,
           });
@@ -122,11 +130,11 @@ export class TrackingService {
   async getCachedRacePositions(raceId: string): Promise<ProcessedPosition[]> {
     const effect = this.redisService.getRacePositions(raceId);
 
-    return runEffect(
+    return Effect.runPromise(
       pipe(
         effect,
-        Effect.catchTag('RedisOperationError', (error) => {
-          this.logger.error('Failed to get cached race positions', {
+        Effect.catchTag("RedisOperationError", (error) => {
+          this.logger.error("Failed to get cached race positions", {
             error: error.message,
             raceId,
           });
@@ -145,11 +153,11 @@ export class TrackingService {
   ): Promise<ProcessedPosition | null> {
     const effect = this.redisService.getLastPosition({ participantId, raceId });
 
-    return runEffect(
+    return Effect.runPromise(
       pipe(
         effect,
-        Effect.catchTag('RedisOperationError', (error) => {
-          this.logger.error('Failed to get cached participant position', {
+        Effect.catchTag("RedisOperationError", (error) => {
+          this.logger.error("Failed to get cached participant position", {
             error: error.message,
             participantId,
             raceId,
@@ -169,7 +177,7 @@ export class TrackingService {
 
     const effect = this.trackingRepository.deleteOlderThan(cutoffDate);
 
-    return runEffect(
+    return Effect.runPromise(
       pipe(
         effect,
         Effect.tap((count) =>
@@ -177,8 +185,8 @@ export class TrackingService {
             this.logger.log(`Cleaned up ${count} old position records`);
           }),
         ),
-        Effect.catchTag('StorageError', (error) => {
-          this.logger.error('Failed to cleanup old positions', {
+        Effect.catchTag("StorageError", (error) => {
+          this.logger.error("Failed to cleanup old positions", {
             error: error.message,
           });
           return Effect.succeed(0);
@@ -190,14 +198,20 @@ export class TrackingService {
   /**
    * Count positions for a participant
    */
-  async countParticipantPositions(participantId: string, raceId: string): Promise<number> {
-    const effect = this.trackingRepository.countByParticipant(participantId, raceId);
+  async countParticipantPositions(
+    participantId: string,
+    raceId: string,
+  ): Promise<number> {
+    const effect = this.trackingRepository.countByParticipant(
+      participantId,
+      raceId,
+    );
 
-    return runEffect(
+    return Effect.runPromise(
       pipe(
         effect,
-        Effect.catchTag('StorageError', (error) => {
-          this.logger.error('Failed to count participant positions', {
+        Effect.catchTag("StorageError", (error) => {
+          this.logger.error("Failed to count participant positions", {
             error: error.message,
             participantId,
             raceId,
@@ -211,7 +225,9 @@ export class TrackingService {
   /**
    * Create Effect dependencies for processing pipeline
    */
-  private createEffectsDeps(broadcastFn: (update: PositionUpdateDto) => void): TrackingEffectsDeps {
+  private createEffectsDeps(
+    broadcastFn: (update: PositionUpdateDto) => void,
+  ): TrackingEffectsDeps {
     return {
       saveToRedis: (position: ProcessedPosition) =>
         pipe(
