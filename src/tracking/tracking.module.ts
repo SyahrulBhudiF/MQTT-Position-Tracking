@@ -1,8 +1,8 @@
-import { Module } from '@nestjs/common';
-import { DatabaseModule } from '../database';
-import { StorageModule } from '../storage/storage.module';
-import { TrackingRepository } from './tracking.repository';
-import { TrackingService } from './tracking.service';
+import { Module } from "@nestjs/common";
+import { DatabaseModule } from "../database/database.module";
+import { StorageModule } from "../storage/storage.module";
+import { TrackingRepository } from "./tracking.repository";
+import { TrackingService } from "./tracking.service";
 
 @Module({
   imports: [DatabaseModule, StorageModule],

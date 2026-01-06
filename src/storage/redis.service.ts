@@ -1,25 +1,33 @@
-import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { Effect } from 'effect';
-import Redis from 'ioredis';
-import { AppConfigService } from '../config/config.service';
-import type { ProcessedPosition, RaceParticipantKey } from '../shared/types';
+import {
+  Injectable,
+  Logger,
+  type OnModuleDestroy,
+  type OnModuleInit,
+} from "@nestjs/common";
+import { Effect } from "effect";
+import Redis from "ioredis";
+import { AppConfigService } from "../config/config.service";
+import type {
+  ProcessedPosition,
+  RaceParticipantKey,
+} from "../shared/types/tracking.types";
 
 export class RedisConnectionError extends Error {
-  readonly _tag = 'RedisConnectionError';
+  readonly _tag = "RedisConnectionError";
   constructor(message: string) {
     super(message);
-    this.name = 'RedisConnectionError';
+    this.name = "RedisConnectionError";
   }
 }
 
 export class RedisOperationError extends Error {
-  readonly _tag = 'RedisOperationError';
+  readonly _tag = "RedisOperationError";
   constructor(
     message: string,
     public readonly operation: string,
   ) {
     super(message);
-    this.name = 'RedisOperationError';
+    this.name = "RedisOperationError";
   }
 }
 
@@ -44,22 +52,22 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
-    this.client.on('connect', () => {
-      this.logger.log('Connected to Redis');
+    this.client.on("connect", () => {
+      this.logger.log("Connected to Redis");
     });
 
-    this.client.on('error', (error) => {
-      this.logger.error('Redis connection error', error);
+    this.client.on("error", (error) => {
+      this.logger.error("Redis connection error", error);
     });
 
-    this.client.on('close', () => {
-      this.logger.warn('Redis connection closed');
+    this.client.on("close", () => {
+      this.logger.warn("Redis connection closed");
     });
   }
 
   async onModuleDestroy(): Promise<void> {
     await this.client.quit();
-    this.logger.log('Redis connection closed gracefully');
+    this.logger.log("Redis connection closed gracefully");
   }
 
   /**
@@ -79,12 +87,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return Effect.tryPromise({
       try: async () => {
         const redisKey = this.getPositionKey(key);
-        await this.client.set(redisKey, JSON.stringify(position), 'EX', 3600); // 1 hour TTL
+        await this.client.set(redisKey, JSON.stringify(position), "EX", 3600); // 1 hour TTL
       },
       catch: (error) =>
         new RedisOperationError(
           `Failed to set position: ${error instanceof Error ? error.message : String(error)}`,
-          'setLastPosition',
+          "setLastPosition",
         ),
     });
   }
@@ -105,7 +113,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       catch: (error) =>
         new RedisOperationError(
           `Failed to get position: ${error instanceof Error ? error.message : String(error)}`,
-          'getLastPosition',
+          "getLastPosition",
         ),
     });
   }
@@ -113,7 +121,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /**
    * Get all participant positions for a race
    */
-  getRacePositions(raceId: string): Effect.Effect<ProcessedPosition[], RedisOperationError, never> {
+  getRacePositions(
+    raceId: string,
+  ): Effect.Effect<ProcessedPosition[], RedisOperationError, never> {
     return Effect.tryPromise({
       try: async () => {
         const pattern = `race:${raceId}:participant:*:last`;
@@ -129,7 +139,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       catch: (error) =>
         new RedisOperationError(
           `Failed to get race positions: ${error instanceof Error ? error.message : String(error)}`,
-          'getRacePositions',
+          "getRacePositions",
         ),
     });
   }
@@ -137,7 +147,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /**
    * Delete position for a participant
    */
-  deletePosition(key: RaceParticipantKey): Effect.Effect<void, RedisOperationError, never> {
+  deletePosition(
+    key: RaceParticipantKey,
+  ): Effect.Effect<void, RedisOperationError, never> {
     return Effect.tryPromise({
       try: async () => {
         const redisKey = this.getPositionKey(key);
@@ -146,7 +158,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       catch: (error) =>
         new RedisOperationError(
           `Failed to delete position: ${error instanceof Error ? error.message : String(error)}`,
-          'deletePosition',
+          "deletePosition",
         ),
     });
   }
@@ -155,7 +167,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * Check if Redis is connected
    */
   isConnected(): boolean {
-    return this.client.status === 'ready';
+    return this.client.status === "ready";
   }
 
   /**

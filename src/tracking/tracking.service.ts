@@ -1,8 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { Effect, pipe } from "effect";
 import { AppConfigService } from "../config/config.service";
-import type { TrackingPosition } from "../database";
-import type { ProcessedPosition } from "../shared/types";
+import type { TrackingPosition } from "../database/schema";
+import type { ProcessedPosition } from "../shared/types/tracking.types";
 import { RedisService } from "../storage/redis.service";
 import type { PositionUpdateDto } from "./dto/tracking.dto";
 import {
@@ -252,6 +252,14 @@ export class TrackingService {
         pipe(
           this.trackingRepository.save(position),
           Effect.map(() => undefined),
+          Effect.mapError(
+            (error) =>
+              new StorageError({
+                message: error.message,
+                operation: "saveToPostgres",
+                cause: error,
+              }),
+          ),
         ),
 
       broadcastPosition: (update: PositionUpdateDto) =>

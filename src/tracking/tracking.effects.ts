@@ -1,6 +1,9 @@
 import { Effect, Schema } from "effect";
-import type { ProcessedPosition, TrackingPayload } from "../shared/types";
-import { TrackingPayloadSchema } from "../shared/types";
+import type {
+  ProcessedPosition,
+  TrackingPayload,
+} from "../shared/types/tracking.types";
+import { TrackingPayloadSchema } from "../shared/types/tracking.types";
 import type { PositionUpdateDto } from "./dto/tracking.dto";
 import {
   InvalidCoordinatesError,

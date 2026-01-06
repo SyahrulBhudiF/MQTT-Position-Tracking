@@ -5,7 +5,7 @@ import {
   type ParticipantStatus,
   type TrackingPayload,
   TrackingPayloadSchema,
-} from "../../shared/types";
+} from "../../shared/types/tracking.types";
 
 /**
  * DTO for incoming MQTT tracking payload
