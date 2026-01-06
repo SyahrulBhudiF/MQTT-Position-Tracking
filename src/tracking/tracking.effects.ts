@@ -1,4 +1,4 @@
-import { Effect, Schema, pipe } from "effect";
+import { Effect, Schema } from "effect";
 import type { ProcessedPosition, TrackingPayload } from "../shared/types";
 import { TrackingPayloadSchema } from "../shared/types";
 import type { PositionUpdateDto } from "./dto/tracking.dto";
@@ -10,56 +10,34 @@ import {
   TimestampParseError,
 } from "./tracking.errors";
 
-/**
- * Configuration for tracking effects
- */
 export interface TrackingEffectsConfig {
   staleDataThresholdMs: number;
 }
 
-/**
- * Dependencies required by tracking effects
- */
 export interface TrackingEffectsDeps {
   saveToRedis: (
     position: ProcessedPosition,
-  ) => Effect.Effect<void, StorageError, never>;
+  ) => Effect.Effect<void, StorageError>;
   saveToPostgres: (
     position: ProcessedPosition,
-  ) => Effect.Effect<void, StorageError, never>;
-  broadcastPosition: (
-    update: PositionUpdateDto,
-  ) => Effect.Effect<void, never, never>;
+  ) => Effect.Effect<void, StorageError>;
+  broadcastPosition: (update: PositionUpdateDto) => Effect.Effect<void>;
 }
 
-/**
- * Validate raw MQTT payload and parse into TrackingPayload
- */
-export const validatePayload = (
-  rawPayload: unknown,
-): Effect.Effect<TrackingPayload, PayloadValidationError, never> => {
-  return pipe(
-    Schema.decodeUnknown(TrackingPayloadSchema)(rawPayload),
-    Effect.mapError((parseError) => {
-      const validationErrors = parseError.message
-        ? [parseError.message]
-        : ["Unknown validation error"];
-      return new PayloadValidationError({
-        message: "Payload validation failed",
-        payload: rawPayload,
-        validationErrors,
-      });
-    }),
+const validatePayload = (rawPayload: unknown) =>
+  Schema.decodeUnknown(TrackingPayloadSchema)(rawPayload).pipe(
+    Effect.mapError(
+      (parseError) =>
+        new PayloadValidationError({
+          message: "Payload validation failed",
+          payload: rawPayload,
+          validationErrors: [parseError.message],
+        }),
+    ),
   );
-};
 
-/**
- * Parse and validate the timestamp from the payload
- */
-export const parseTimestamp = (
-  timestamp: string,
-): Effect.Effect<Date, TimestampParseError, never> => {
-  return Effect.try({
+const parseTimestamp = (timestamp: string) =>
+  Effect.try({
     try: () => {
       const date = new Date(timestamp);
       if (Number.isNaN(date.getTime())) {
@@ -73,94 +51,61 @@ export const parseTimestamp = (
         rawTimestamp: timestamp,
       }),
   });
-};
 
-/**
- * Validate coordinates are within valid ranges
- */
-export const validateCoordinates = (
-  latitude: number,
-  longitude: number,
-): Effect.Effect<
-  { latitude: number; longitude: number },
-  InvalidCoordinatesError,
-  never
-> => {
-  return Effect.try({
-    try: () => {
-      if (latitude < -90 || latitude > 90) {
-        throw new Error(`Latitude ${latitude} out of range [-90, 90]`);
-      }
-      if (longitude < -180 || longitude > 180) {
-        throw new Error(`Longitude ${longitude} out of range [-180, 180]`);
-      }
-      return { latitude, longitude };
-    },
-    catch: () =>
-      new InvalidCoordinatesError({
+const validateCoordinates = (latitude: number, longitude: number) =>
+  Effect.gen(function* () {
+    if (latitude < -90 || latitude > 90) {
+      yield* new InvalidCoordinatesError({
         message: `Invalid coordinates: lat=${latitude}, lon=${longitude}`,
         latitude,
         longitude,
-      }),
+      });
+    }
+    if (longitude < -180 || longitude > 180) {
+      yield* new InvalidCoordinatesError({
+        message: `Invalid coordinates: lat=${latitude}, lon=${longitude}`,
+        latitude,
+        longitude,
+      });
+    }
+    return { latitude, longitude };
   });
-};
 
-/**
- * Check if the position data is stale (too old)
- */
-export const checkStaleData = (
+const checkStaleData = (
   participantId: string,
   raceId: string,
   timestamp: Date,
   thresholdMs: number,
-): Effect.Effect<Date, StaleDataError, never> => {
-  return Effect.try({
-    try: () => {
-      const now = Date.now();
-      const dataAge = now - timestamp.getTime();
-
-      if (dataAge > thresholdMs) {
-        throw new Error("Data is stale");
-      }
-
-      return timestamp;
-    },
-    catch: () =>
-      new StaleDataError({
+) =>
+  Effect.gen(function* () {
+    const dataAge = Date.now() - timestamp.getTime();
+    if (dataAge > thresholdMs) {
+      yield* new StaleDataError({
         message: `Data for participant ${participantId} is stale`,
         participantId,
         raceId,
         dataTimestamp: timestamp,
         threshold: thresholdMs,
-      }),
+      });
+    }
+    return timestamp;
   });
-};
 
-/**
- * Transform validated payload into ProcessedPosition
- */
-export const transformToProcessedPosition = (
+const toProcessedPosition = (
   payload: TrackingPayload,
   clientTimestamp: Date,
-): Effect.Effect<ProcessedPosition, never, never> => {
-  return Effect.succeed({
-    participantId: payload.participant_id,
-    raceId: payload.race_id,
-    latitude: payload.latitude,
-    longitude: payload.longitude,
-    clientTimestamp,
-    serverReceivedAt: new Date(),
-    status: payload.status,
-  });
-};
+): ProcessedPosition => ({
+  participantId: payload.participant_id,
+  raceId: payload.race_id,
+  latitude: payload.latitude,
+  longitude: payload.longitude,
+  clientTimestamp,
+  serverReceivedAt: new Date(),
+  status: payload.status,
+});
 
-/**
- * Transform ProcessedPosition to PositionUpdateDto
- */
-export const transformToPositionUpdate = (
-  position: ProcessedPosition,
-): Effect.Effect<PositionUpdateDto, never, never> => {
-  return Effect.succeed({
+const toPositionUpdateDto = (position: ProcessedPosition): PositionUpdateDto =>
+  ({
     participantId: position.participantId,
     raceId: position.raceId,
     latitude: position.latitude,
@@ -168,80 +113,40 @@ export const transformToPositionUpdate = (
     timestamp: position.clientTimestamp,
     serverReceivedAt: position.serverReceivedAt,
     status: position.status,
-  } as PositionUpdateDto);
-};
+  }) as PositionUpdateDto;
 
-/**
- * Main processing pipeline for incoming tracking data
- * This is the core Effect pipeline that processes MQTT messages
- */
 export const processTrackingData = (
   rawPayload: unknown,
   config: TrackingEffectsConfig,
   deps: TrackingEffectsDeps,
-): Effect.Effect<
-  PositionUpdateDto,
-  | PayloadValidationError
-  | TimestampParseError
-  | InvalidCoordinatesError
-  | StaleDataError
-  | StorageError,
-  never
-> => {
-  return pipe(
-    // Step 1: Validate the raw payload
-    validatePayload(rawPayload),
+) =>
+  Effect.gen(function* () {
+    const payload = yield* validatePayload(rawPayload);
+    const clientTimestamp = yield* parseTimestamp(payload.timestamp);
 
-    // Step 2: Parse and validate timestamp
-    Effect.flatMap((payload) =>
-      pipe(
-        parseTimestamp(payload.timestamp),
-        Effect.flatMap((clientTimestamp) =>
-          // Step 3: Validate coordinates
-          pipe(
-            validateCoordinates(payload.latitude, payload.longitude),
-            Effect.flatMap(() =>
-              // Step 4: Check for stale data
-              checkStaleData(
-                payload.participant_id,
-                payload.race_id,
-                clientTimestamp,
-                config.staleDataThresholdMs,
-              ),
-            ),
-            Effect.flatMap(() =>
-              // Step 5: Transform to processed position
-              transformToProcessedPosition(payload, clientTimestamp),
-            ),
-          ),
-        ),
-      ),
-    ),
+    yield* validateCoordinates(payload.latitude, payload.longitude);
+    yield* checkStaleData(
+      payload.participant_id,
+      payload.race_id,
+      clientTimestamp,
+      config.staleDataThresholdMs,
+    );
 
-    // Step 6: Save to Redis and PostgreSQL in parallel
-    Effect.flatMap((position) =>
-      pipe(
-        Effect.all(
-          [deps.saveToRedis(position), deps.saveToPostgres(position)],
-          {
-            concurrency: 2,
-          },
-        ),
-        Effect.map(() => position),
-      ),
-    ),
+    const position = toProcessedPosition(payload, clientTimestamp);
 
-    // Step 7: Transform to PositionUpdateDto
-    Effect.flatMap(transformToPositionUpdate),
+    yield* Effect.all(
+      [deps.saveToRedis(position), deps.saveToPostgres(position)],
+      {
+        concurrency: 2,
+      },
+    );
 
-    // Step 8: Broadcast to WebSocket clients
-    Effect.tap((update) => deps.broadcastPosition(update)),
-  );
-};
+    const update = toPositionUpdateDto(position);
+    yield* deps.broadcastPosition(update);
 
-/**
- * Process tracking data with error logging
- */
+    return update;
+  });
+
 export const processTrackingDataWithLogging = (
   rawPayload: unknown,
   config: TrackingEffectsConfig,
@@ -251,9 +156,8 @@ export const processTrackingDataWithLogging = (
     warn: (message: string, context?: Record<string, unknown>) => void;
     error: (message: string, context?: Record<string, unknown>) => void;
   },
-): Effect.Effect<PositionUpdateDto | null, never, never> => {
-  return pipe(
-    processTrackingData(rawPayload, config, deps),
+) =>
+  processTrackingData(rawPayload, config, deps).pipe(
     Effect.tap((update) =>
       Effect.sync(() => {
         logger.debug("Successfully processed tracking data", {
@@ -263,52 +167,48 @@ export const processTrackingDataWithLogging = (
       }),
     ),
     Effect.catchTags({
-      PayloadValidationError: (error) =>
+      PayloadValidationError: (e) =>
         Effect.sync(() => {
           logger.warn("Payload validation failed", {
-            errors: error.validationErrors,
+            errors: e.validationErrors,
           });
           return null;
         }),
-      StaleDataError: (error) =>
+      StaleDataError: (e) =>
         Effect.sync(() => {
           logger.warn("Dropped stale data", {
-            participantId: error.participantId,
-            raceId: error.raceId,
-            dataTimestamp: error.dataTimestamp.toISOString(),
+            participantId: e.participantId,
+            raceId: e.raceId,
+            dataTimestamp: e.dataTimestamp.toISOString(),
           });
           return null;
         }),
-      TimestampParseError: (error) =>
+      TimestampParseError: (e) =>
         Effect.sync(() => {
           logger.warn("Failed to parse timestamp", {
-            rawTimestamp: error.rawTimestamp,
+            rawTimestamp: e.rawTimestamp,
           });
           return null;
         }),
-      InvalidCoordinatesError: (error) =>
+      InvalidCoordinatesError: (e) =>
         Effect.sync(() => {
           logger.warn("Invalid coordinates received", {
-            latitude: error.latitude,
-            longitude: error.longitude,
+            latitude: e.latitude,
+            longitude: e.longitude,
           });
           return null;
         }),
-      StorageError: (error) =>
+      StorageError: (e) =>
         Effect.sync(() => {
           logger.error("Storage operation failed", {
-            operation: error.operation,
-            message: error.message,
+            operation: e.operation,
+            message: e.message,
           });
           return null;
         }),
     }),
   );
-};
 
-/**
- * Batch process multiple tracking payloads
- */
 export const batchProcessTrackingData = (
   payloads: unknown[],
   config: TrackingEffectsConfig,
@@ -318,16 +218,14 @@ export const batchProcessTrackingData = (
     warn: (message: string, context?: Record<string, unknown>) => void;
     error: (message: string, context?: Record<string, unknown>) => void;
   },
-): Effect.Effect<PositionUpdateDto[], never, never> => {
-  return pipe(
-    Effect.all(
-      payloads.map((payload) =>
-        processTrackingDataWithLogging(payload, config, deps, logger),
-      ),
-      { concurrency: 10 },
+) =>
+  Effect.all(
+    payloads.map((payload) =>
+      processTrackingDataWithLogging(payload, config, deps, logger),
     ),
+    { concurrency: 10 },
+  ).pipe(
     Effect.map((results) =>
       results.filter((r): r is PositionUpdateDto => r !== null),
     ),
   );
-};
